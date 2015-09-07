@@ -114,4 +114,5 @@ paradigm has been adopted as a built-in language feature in newer languages
 like Go.
 
 The drawback, in the case of `libco`, is that the code between blocking
-operations cannot run
+operations cannot run for too long, as `libco` has no preemption mechanism.
+However, in most backends `libco` threads are very cheap.
