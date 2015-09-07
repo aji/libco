@@ -140,6 +140,18 @@ co_context_t *co_init(void) {
 	return ctx;
 }
 
+static thread_t *unwait(co_context_t *ctx, int fd) {
+	for (f=ctx->files; f; f=f->next) {
+		if (f->fd == fd) {
+			thread_t *t = f->waiting;
+			f->waiting = NULL;
+			return t;
+		}
+	}
+
+	return NULL;
+}
+
 static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 	thread_t *res;
 	co_context_t *ctx = _ctx;
@@ -160,14 +172,7 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 			break;
 		case EVENT_FD_CAN_READ:
 		case EVENT_FD_CAN_WRITE:
-			for (f=ctx->files; f; f=f->next) {
-				if (f->fd == evt.v.fd) {
-					thread_t *t = f->waiting;
-					f->waiting = NULL;
-					return t;
-				}
-			}
-			break;
+			return unwait(ctx, evt.v.fd);
 		}
 	}
 
