@@ -3,6 +3,7 @@
 
 #include "thread.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <ucontext.h>
 
@@ -35,7 +36,7 @@
 struct thread_context {
 	ucontext_t poller;
 	thread_t *self;
-	int running;
+	bool running;
 };
 
 struct thread {
@@ -57,7 +58,7 @@ thread_context_t *thread_context_new(void) {
 void thread_context_run(thread_context_t *ctx, thread_poll_fn *fn, void *user) {
 	thread_t *next;
 
-	ctx->running = 1;
+	ctx->running = true;
 
 	for (;;) {
 		for (next = NULL; !next; ) {
@@ -74,7 +75,7 @@ void thread_context_run(thread_context_t *ctx, thread_poll_fn *fn, void *user) {
 }
 
 void thread_context_stop(thread_context_t *ctx) {
-	ctx->running = 0;
+	ctx->running = false;
 }
 
 thread_t *thread_create(thread_context_t *ctx, thread_fn *start, void *user) {

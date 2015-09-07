@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#include "src/thread.h"
+#include "../src/thread.h"
 
 static thread_t *inside_thread;
 static volatile int counter = 0;
