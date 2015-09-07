@@ -83,7 +83,7 @@ continue.
 ## Backend
 
 `libco` currently only supports `select` and `ucontext` as event and threading
-backends, respectively. However, `libevent` and POSIX threads support are
+backends, respectively. However, `epoll`, `poll`, and POSIX threads support are
 planned for the near future.
 
 ## Concepts
