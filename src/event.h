@@ -13,6 +13,7 @@ struct event_polled {
 		EVENT_NOTHING,              /* (none) */
 		EVENT_FD_CAN_READ,          /* fd */
 		EVENT_FD_CAN_WRITE,         /* fd */
+		EVENT_FD_ERROR,             /* fd */
 	} tag;
 
 	union {

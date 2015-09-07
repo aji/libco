@@ -45,6 +45,7 @@ static void start_thread(thread_context_t *ctx, void *priv) {
 	struct new_thread *nt = priv;
 	nt->start(nt->ctx, nt->user);
 	nt->ctx->num_threads --;
+	free(nt);
 }
 
 static void add_file(co_context_t *ctx, co_file_t *f) {
@@ -52,6 +53,8 @@ static void add_file(co_context_t *ctx, co_file_t *f) {
 
 	f->next = ctx->files;
 	f->prev = NULL;
+
+	ctx->files = f;
 }
 
 static void remove_file(co_context_t *ctx, co_file_t *f) {
@@ -73,6 +76,7 @@ co_err_t co_spawn(
 	next->start = start;
 	next->user = user;
 	next->t = thread_create(ctx->threads, start_thread, next);
+	next->next = ctx->new_thread;
 	ctx->new_thread = next;
 	ctx->num_threads ++;
 
@@ -168,12 +172,14 @@ co_file_t *co_connect_tcp(
 ) {
 	struct addrinfo gai_hints;
 	struct addrinfo *gai;
+	struct sockaddr_in *sa4;
+	struct sockaddr_in6 *sa6;
+	void *addr;
 	int sock, err;
 	co_file_t *f;
-
+	char buf[512];
 
 	/* TODO: replace this with an async lookup mechanism */
-	printf("performing lookup...\n");
 	memset(&gai_hints, 0, sizeof(gai_hints));
 	gai_hints.ai_family = AF_INET;
 	gai_hints.ai_socktype = SOCK_STREAM;
@@ -185,19 +191,32 @@ co_file_t *co_connect_tcp(
 	if (gai->ai_addr == NULL)
 		goto fail_addr;
 
-	printf("have address...\n");
+	switch (gai->ai_family) {
+	case AF_INET:
+		sa4 = (void*)gai->ai_addr;
+		sa4->sin_port = htons(port);
+		addr = &sa4->sin_addr;
+		break;
+	case AF_INET6:
+		sa6 = (void*)gai->ai_addr;
+		sa6->sin6_port = htons(port);
+		addr = &sa6->sin6_addr;
+		break;
+	default:
+		goto fail_addr;
+	}
+
 	if ((sock = socket(gai->ai_family, SOCK_STREAM, 0)) < 0)
 		goto fail_addr;
 	fcntl(sock, F_SETFL, O_NONBLOCK);
-	fcntl(sock, F_SETFL, O_ASYNC);
 
 	f = calloc(1, sizeof(*f));
 	f->waiting = NULL;
 	f->fd = sock;
 	f->next = f->prev = NULL;
+	add_file(ctx, f);
 
 	for (;;) {
-		printf("attempting connect...\n");
 		err = connect(sock, gai->ai_addr, gai->ai_addrlen);
 		if (err == 0)
 			break;
@@ -206,7 +225,6 @@ co_file_t *co_connect_tcp(
 		case EINPROGRESS:
 		case EINTR:
 		case EALREADY:
-			printf("connect in progress, deferred.\n");
 			f->waiting = thread_self(ctx->threads);
 			event_fd_want_write(f->fd);
 			thread_defer_self(ctx->threads);
@@ -217,12 +235,12 @@ co_file_t *co_connect_tcp(
 		}
 	}
 
-	add_file(ctx, f);
 	freeaddrinfo(gai);
 	return f;
 
 fail_connect:
 	perror("co_connect_tcp failed");
+	remove_file(ctx, f);
 	free(f);
 	close(sock);
 fail_addr:
@@ -263,10 +281,14 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 	event_polled_t evt;
 	co_file_t *f;
 
+	if (ctx->num_threads == 0) {
+		thread_context_stop(threads);
+		return NULL;
+	}
+
 	if (ctx->new_thread) {
 		struct new_thread *next = ctx->new_thread->next;
 		res = ctx->new_thread->t;
-		free(ctx->new_thread);
 		ctx->new_thread = next;
 		return res;
 	}
@@ -280,9 +302,6 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 			return unwait(ctx, evt.v.fd);
 		}
 	}
-
-	if (ctx->num_threads == 0)
-		thread_context_stop(threads);
 
 	return NULL;
 }

@@ -9,6 +9,7 @@
 static int fd_max;
 static fd_set fds_waiting_read;
 static fd_set fds_waiting_write;
+static fd_set fds_waiting;
 
 void event_init(void) {
 	fd_max = 0;
@@ -19,11 +20,13 @@ void event_init(void) {
 void event_fd_want_read(int fd) {
 	if (fd > fd_max) fd_max = fd;
 	FD_SET(fd, &fds_waiting_read);
+	FD_SET(fd, &fds_waiting);
 }
 
 void event_fd_want_write(int fd) {
 	if (fd > fd_max) fd_max = fd;
 	FD_SET(fd, &fds_waiting_write);
+	FD_SET(fd, &fds_waiting);
 }
 
 bool event_poll(event_polled_t *result) {
@@ -33,7 +36,7 @@ bool event_poll(event_polled_t *result) {
 
 	r = fds_waiting_read;
 	w = fds_waiting_write;
-	FD_ZERO(&x);
+	x = fds_waiting;
 
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
@@ -49,6 +52,8 @@ bool event_poll(event_polled_t *result) {
 			result->tag = EVENT_FD_CAN_READ;
 			result->v.fd = fd;
 			FD_CLR(fd, &fds_waiting_read);
+			if (!FD_ISSET(fd, &fds_waiting_write))
+				FD_CLR(fd, &fds_waiting);
 			return true;
 		}
 	}
@@ -58,6 +63,19 @@ bool event_poll(event_polled_t *result) {
 			result->tag = EVENT_FD_CAN_WRITE;
 			result->v.fd = fd;
 			FD_CLR(fd, &fds_waiting_write);
+			if (!FD_ISSET(fd, &fds_waiting_read))
+				FD_CLR(fd, &fds_waiting);
+			return true;
+		}
+	}
+
+	for (fd=0; fd<=fd_max; fd++) {
+		if (FD_ISSET(fd, &x)) {
+			result->tag = EVENT_FD_ERROR;
+			result->v.fd = fd;
+			FD_CLR(fd, &fds_waiting_read);
+			FD_CLR(fd, &fds_waiting_write);
+			FD_CLR(fd, &fds_waiting);
 			return true;
 		}
 	}

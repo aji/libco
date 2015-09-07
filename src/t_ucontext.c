@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <ucontext.h>
 
-#define STACK_SIZE (16<<10)
+#define STACK_SIZE (1<<20)
 
 #if __SIZEOF_POINTER__ > __SIZEOF_INT__
 # if __SIZEOF_INT__ < 4

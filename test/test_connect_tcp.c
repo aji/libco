@@ -2,55 +2,68 @@
 #include <stdio.h>
 #include <string.h>
 
-static void stdin_thread(co_context_t *co, void *user) {
-	co_file_t *in = co_open(co, "/dev/stdin", CO_RDONLY, 0666);
-	char buf[4];
-	ssize_t rsize;
+struct connector {
+	const char *host;
+	const char *name;
+};
 
-	printf("hello from stdin_thread!\n");
-
-	do {
-		memset(buf, 0, sizeof(buf));
-		co_read(co, in, &buf, 4, &rsize);
-		printf("got %d bytes: %.4s\n", rsize, buf);
-	} while (rsize);
-
-	printf("stdin_thread done!\n");
-}
-
-static void google_thread(co_context_t *co, void *user) {
-	co_file_t *goog;
-	const char *request =
+static void connector_thread(co_context_t *co, void *_conn) {
+	co_file_t *peer;
+	struct connector *conn = _conn;
+	const char *request_fmt =
 		"GET / HTTP/1.0\r\n"
-		"Host: google.com\r\n"
+		"Host: %s\r\n"
 		"Connection: close\r\n"
 		"User-Agent: libco/0.1\r\n"
 		"\r\n";
-	char buf[2048];
+	char buf[65536];
 	ssize_t rsize;
 
-	printf("hello from google_thread! connecting...\n");
-	goog = co_connect_tcp(co, "google.com", 80);
+	snprintf(buf, 65536, request_fmt, conn->host);
 
-	if (goog == NULL) {
-		printf("connect failed :(\n");
+	printf("%s: connecting to %s\n", conn->name, conn->host);
+	peer = co_connect_tcp(co, conn->host, 80);
+
+	if (peer == NULL) {
+		printf("%s: connect failed :(\n", conn->name);
 		return;
 	}
 
-	printf("connected to google! sending request...\n");
-	co_write(co, goog, request, strlen(request), NULL);
-	printf("request sent! reading response...\n");
+	printf("%s: connected! sending request...\n", conn->name);
+	co_write(co, peer, buf, strlen(buf), NULL);
+	printf("%s: request sent! reading response...\n", conn->name);
 
 	do {
 		memset(buf, 0, sizeof(buf));
-		co_read(co, goog, &buf, 2048, &rsize);
-		printf("got %d bytes from google\n", rsize, buf);
+		co_read(co, peer, &buf, 65536, &rsize);
+		printf("%s: got %d bytes\n", conn->name, rsize);
 	} while (rsize);
+
+	printf("%s: bye!\n", conn->name);
+
+	free(conn);
 }
 
 static void main_thread(co_context_t *co, void *user) {
-	co_spawn(co, google_thread, NULL);
-	co_spawn(co, stdin_thread, NULL);
+	struct connector *google, *interlinked, *nowhere;
+
+	google = calloc(1, sizeof(*google));
+	google->host = "www.google.com";
+	google->name = "google";
+
+	interlinked = calloc(1, sizeof(*interlinked));
+	interlinked->host = "interlinked.me";
+	interlinked->name = "interlinked";
+
+	nowhere = calloc(1, sizeof(*nowhere));
+	nowhere->host = "nonexistent.badtld";
+	nowhere->name = "nowhere";
+
+	printf("spawning threads...\n");
+	co_spawn(co, connector_thread, google);
+	co_spawn(co, connector_thread, interlinked);
+	co_spawn(co, connector_thread, nowhere);
+	printf("done\n");
 }
 
 int main(int argc, char *argv[]) {
