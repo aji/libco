@@ -13,6 +13,13 @@ typedef enum co_open_type              co_open_type_t;
 typedef struct co_context              co_context_t;
 typedef struct co_file                 co_file_t;
 
+enum co_open_type {
+	CO_RDONLY,
+	CO_WRONLY,
+	CO_RDWR,
+	CO_APPEND
+};
+
 typedef void co_thread_fn(
 	co_context_t                  *ctx,
 	void                          *user
