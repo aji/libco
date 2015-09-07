@@ -17,6 +17,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define READBUF_SIZE 2048
+
 #define error(x) abort()
 
 struct co_context {
@@ -29,6 +31,8 @@ struct co_context {
 struct co_file {
 	thread_t *waiting;
 	int fd;
+	char readbuf[READBUF_SIZE];
+	size_t readbuflen;
 	co_file_t *next;
 	co_file_t *prev;
 };
@@ -46,6 +50,12 @@ static void start_thread(thread_context_t *ctx, void *priv) {
 	nt->start(nt->ctx, nt->user);
 	nt->ctx->num_threads --;
 	free(nt);
+}
+
+static co_file_t *new_file(int fd) {
+	co_file_t *f = calloc(1, sizeof(*f));
+	f->fd = fd;
+	return f;
 }
 
 static void add_file(co_context_t *ctx, co_file_t *f) {
@@ -86,24 +96,72 @@ co_err_t co_spawn(
 co_err_t co_read(
 	co_context_t                  *ctx,
 	co_file_t                     *file,
-	void                          *buf,
+	void                          *_buf,
 	size_t                         nbyte,
 	ssize_t                       *rsize
 ) {
-	ssize_t rsz;
+	unsigned char *buf = _buf;
+	ssize_t rsz, total;
 
 	if (file->waiting != NULL) {
 		error("another context is already waiting on this file");
 		return -1;
 	}
 
+	total = 0;
+
+	/* first fulfill as much of the request with the read buffer as we can */
+	if (file->readbuflen > 0) {
+		rsz = file->readbuflen;
+		if (rsz > nbyte) rsz = nbyte;
+		memcpy(buf, file->readbuf, rsz);
+		buf += rsz;
+		total += rsz;
+		nbyte -= rsz;
+		file->readbuflen -= rsz;
+		memmove(file->readbuf, file->readbuf + rsz, file->readbuflen);
+	}
+
+	/* either the read buffer satisfied the entire request, or the user
+	 * actually asked for 0 bytes... */
+	if (nbyte == 0) {
+		if (rsize) *rsize = total;
+		return 0;
+	}
+
+	/* if the read buffer couldn't satisfy the whole request, then do an
+	 * actual read. reads for more bytes than the read buffer can hold pass
+	 * directly through to the user. otherwise, we attempt to read into the
+	 * entire read buffer and do one last copy out of it for the call. */
 	file->waiting = thread_self(ctx->threads);
 	event_fd_want_read(file->fd);
-
 	thread_defer_self(ctx->threads);
 
-	rsz = read(file->fd, buf, nbyte);
-	if (rsize) *rsize = rsz;
+	if (nbyte > READBUF_SIZE) {
+		rsz = read(file->fd, buf, nbyte);
+		if (rsz < 0) { // TODO: what do we do..
+			if (rsize) *rsize = total;
+			return total > 0 ? 0 : -1;
+		} else {
+			total += rsz;
+		}
+	} else {
+		file->readbuflen = read(
+			file->fd,
+			file->readbuf,
+			READBUF_SIZE - file->readbuflen
+		);
+		rsz = file->readbuflen;
+		if (rsz > nbyte) rsz = nbyte;
+		memcpy(buf, file->readbuf, rsz);
+		buf += rsz;
+		total += rsz;
+		nbyte -= rsz;
+		file->readbuflen -= rsz;
+		memmove(file->readbuf, file->readbuf + rsz, file->readbuflen);
+	}
+
+	if (rsize) *rsize = total;
 	return 0;
 }
 
@@ -143,11 +201,8 @@ co_file_t *co_open(
 	if (!(fd = open(path, O_RDONLY)))
 		return NULL;
 
-	f = calloc(1, sizeof(*f));
-	f->waiting = NULL;
-	f->fd = fd;
+	f = new_file(fd);
 	add_file(ctx, f);
-	ctx->files = f;
 
 	return f;
 }
@@ -210,10 +265,7 @@ co_file_t *co_connect_tcp(
 		goto fail_addr;
 	fcntl(sock, F_SETFL, O_NONBLOCK);
 
-	f = calloc(1, sizeof(*f));
-	f->waiting = NULL;
-	f->fd = sock;
-	f->next = f->prev = NULL;
+	f = new_file(sock);
 	add_file(ctx, f);
 
 	for (;;) {

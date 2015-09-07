@@ -1,5 +1,6 @@
 #include <co.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 struct connector {
@@ -35,7 +36,7 @@ static void connector_thread(co_context_t *co, void *_conn) {
 
 	do {
 		memset(buf, 0, sizeof(buf));
-		co_read(co, peer, &buf, 65536, &rsize);
+		co_read(co, peer, buf, 65536, &rsize);
 		printf("%s: got %d bytes\n", conn->name, rsize);
 	} while (rsize);
 

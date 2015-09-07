@@ -49,7 +49,6 @@ in terms of these functions, then `libco` is for you:
       * `co_close`
    * `Sockets`
       * `co_connect_tcp`
-      * `co_bind_tcp`
 
 #### &mdash; Everything below this line is speculation and subject to change &mdash;
 
