@@ -50,6 +50,10 @@ determine which backend to use.
 
 * Thread management
    * `co_spawn`
+* Generators
+   * `co_generator`
+   * `co_fetch`
+   * `co_yield`
 * IO
    * `co_read`
    * `co_write`
