@@ -36,15 +36,8 @@ extern co_err_t co_spawn(
 	);
 
 
-/* FILE OPERATIONS
+/* IO OPERATIONS
    ========================================================================= */
-
-extern co_file_t *co_open(
-	co_context_t                  *ctx,
-	const char                    *path,
-	co_open_type_t                 typ,
-	unsigned                       mode
-	);
 
 extern co_err_t co_read(
 	co_context_t                  *ctx,
@@ -53,12 +46,43 @@ extern co_err_t co_read(
 	size_t                         nbyte,
 	ssize_t                       *rsize
 	);
+
 extern co_err_t co_write(
 	co_context_t                  *ctx,
 	co_file_t                     *file,
 	const void                    *buf,
 	size_t                         nbyte,
 	ssize_t                       *wsize
+	);
+
+/* -- filesystem -- */
+
+extern co_file_t *co_open(
+	co_context_t                  *ctx,
+	const char                    *path,
+	co_open_type_t                 typ,
+	unsigned                       mode
+	);
+
+extern void co_close(
+	co_context_t                  *ctx,
+	co_file_t                     *file
+	);
+
+
+/* -- sockets -- */
+
+extern co_file_t *co_connect_tcp(
+	co_context_t                  *ctx,
+	const char                    *host,
+	unsigned short                 port
+	);
+
+extern co_file_t *co_bind_tcp(
+	co_context_t                  *ctx,
+	const char                    *host,
+	unsigned short                 port,
+	int                            backlog
 	);
 
 

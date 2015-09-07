@@ -34,6 +34,23 @@ the case that solutions are needed to shuffle data between multiple sources
 with minimal processing in between, and why shouldn't such an apparently simple
 task be actually simple in practice?
 
+## Operations
+
+`libco` provides the following functions. If you can write your blocking code
+in terms of these functions, then `libco` is for you:
+
+* Thread management
+   * `co_spawn`
+* IO
+   * `co_read`
+   * `co_write`
+   * `Filesystem`
+      * `co_open`
+      * `co_close`
+   * `Sockets`
+      * `co_connect_tcp`
+      * `co_bind_tcp`
+
 #### &mdash; Everything below this line is speculation and subject to change &mdash;
 
 ## Building/installing

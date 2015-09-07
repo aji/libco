@@ -6,10 +6,16 @@
 #include "event.h"
 #include "thread.h"
 
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/stat.h>
+#include <arpa/inet.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define error(x) abort()
 
@@ -24,6 +30,7 @@ struct co_file {
 	thread_t *waiting;
 	int fd;
 	co_file_t *next;
+	co_file_t *prev;
 };
 
 struct new_thread {
@@ -40,25 +47,18 @@ static void start_thread(thread_context_t *ctx, void *priv) {
 	nt->ctx->num_threads --;
 }
 
-co_file_t *co_open(
-	co_context_t                  *ctx,
-	const char                    *path,
-	co_open_type_t                 typ,
-	unsigned                       mode
-) {
-	int fd;
-	co_file_t *f;
+static void add_file(co_context_t *ctx, co_file_t *f) {
+	if (ctx->files) ctx->files->prev = f;
 
-	if (!(fd = open(path, O_RDONLY)))
-		return NULL;
-
-	f = calloc(1, sizeof(*f));
-	f->waiting = NULL;
-	f->fd = fd;
 	f->next = ctx->files;
-	ctx->files = f;
+	f->prev = NULL;
+}
 
-	return f;
+static void remove_file(co_context_t *ctx, co_file_t *f) {
+	if (ctx->files == f) ctx->files = f->next;
+
+	if (f->next) f->next->prev = f->prev;
+	if (f->prev) f->prev->next = f->next;
 }
 
 co_err_t co_spawn(
@@ -127,6 +127,109 @@ co_err_t co_write(
 	return 0;
 }
 
+co_file_t *co_open(
+	co_context_t                  *ctx,
+	const char                    *path,
+	co_open_type_t                 typ,
+	unsigned                       mode
+) {
+	int fd;
+	co_file_t *f;
+
+	if (!(fd = open(path, O_RDONLY)))
+		return NULL;
+
+	f = calloc(1, sizeof(*f));
+	f->waiting = NULL;
+	f->fd = fd;
+	add_file(ctx, f);
+	ctx->files = f;
+
+	return f;
+}
+
+void co_close(
+	co_context_t                  *ctx,
+	co_file_t                     *f
+) {
+	if (f == NULL)
+		return;
+
+	remove_file(ctx, f);
+
+	close(f->fd);
+	free(f);
+}
+
+co_file_t *co_connect_tcp(
+	co_context_t                  *ctx,
+	const char                    *host,
+	unsigned short                 port
+) {
+	struct addrinfo gai_hints;
+	struct addrinfo *gai;
+	int sock, err;
+	co_file_t *f;
+
+
+	/* TODO: replace this with an async lookup mechanism */
+	printf("performing lookup...\n");
+	memset(&gai_hints, 0, sizeof(gai_hints));
+	gai_hints.ai_family = AF_INET;
+	gai_hints.ai_socktype = SOCK_STREAM;
+	gai_hints.ai_protocol = 0;
+	if ((err = getaddrinfo(host, NULL, &gai_hints, &gai)) != 0) {
+		printf("co_connect_tcp failed: %s\n", gai_strerror(err));
+		return NULL;
+	}
+	if (gai->ai_addr == NULL)
+		goto fail_addr;
+
+	printf("have address...\n");
+	if ((sock = socket(gai->ai_family, SOCK_STREAM, 0)) < 0)
+		goto fail_addr;
+	fcntl(sock, F_SETFL, O_NONBLOCK);
+	fcntl(sock, F_SETFL, O_ASYNC);
+
+	f = calloc(1, sizeof(*f));
+	f->waiting = NULL;
+	f->fd = sock;
+	f->next = f->prev = NULL;
+
+	for (;;) {
+		printf("attempting connect...\n");
+		err = connect(sock, gai->ai_addr, gai->ai_addrlen);
+		if (err == 0)
+			break;
+
+		switch (errno) {
+		case EINPROGRESS:
+		case EINTR:
+		case EALREADY:
+			printf("connect in progress, deferred.\n");
+			f->waiting = thread_self(ctx->threads);
+			event_fd_want_write(f->fd);
+			thread_defer_self(ctx->threads);
+			continue;
+
+		default:
+			goto fail_connect;
+		}
+	}
+
+	add_file(ctx, f);
+	freeaddrinfo(gai);
+	return f;
+
+fail_connect:
+	perror("co_connect_tcp failed");
+	free(f);
+	close(sock);
+fail_addr:
+	freeaddrinfo(gai);
+	return NULL;
+}
+
 co_context_t *co_init(void) {
 	co_context_t *ctx;
 
@@ -141,6 +244,8 @@ co_context_t *co_init(void) {
 }
 
 static thread_t *unwait(co_context_t *ctx, int fd) {
+	co_file_t *f;
+
 	for (f=ctx->files; f; f=f->next) {
 		if (f->fd == fd) {
 			thread_t *t = f->waiting;
