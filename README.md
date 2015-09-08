@@ -45,10 +45,10 @@ in terms of these functions, then `libco` is for you:
    * `co_read`
    * `co_read_line`
    * `co_write`
-   * `Filesystem`
+   * Filesystem
       * `co_open`
       * `co_close`
-   * `Sockets`
+   * Sockets
       * `co_connect_tcp`
 
 #### &mdash; Everything below this line is speculation and subject to change &mdash;
