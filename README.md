@@ -43,6 +43,7 @@ in terms of these functions, then `libco` is for you:
    * `co_spawn`
 * IO
    * `co_read`
+   * `co_read_line`
    * `co_write`
    * `Filesystem`
       * `co_open`
