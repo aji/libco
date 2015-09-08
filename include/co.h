@@ -139,6 +139,13 @@ extern co_logger_t *co_logger(
 	co_logger_t                   *inherit
 	);
 
+extern ssize_t co_fprintf(
+	co_context_t                  *ctx,
+	co_file_t                     *file,
+	const char                    *fmt,
+	...
+	);
+
 /* CONTEXT MANAGEMENT
    ========================================================================= */
 

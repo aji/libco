@@ -162,12 +162,16 @@ co_err_t co_read(
 			total += rsz;
 		}
 	} else {
-		file->readbuflen = read(
+		rsz = read(
 			file->fd,
 			file->readbuf,
 			READBUF_SIZE - file->readbuflen
 		);
-		rsz = file->readbuflen;
+		if (rsz < 0) { // TODO: what do we do..
+			if (rsize) *rsize = total;
+			return total > 0 ? 0 : -1;
+		}
+		file->readbuflen = rsz;
 		if (rsz > nbyte) rsz = nbyte;
 		memcpy(buf, file->readbuf, rsz);
 		buf += rsz;
@@ -358,8 +362,8 @@ co_file_t *co_connect_tcp(
 	f = new_file(sock);
 	add_file(ctx, f);
 
+	co_debug(&ctx->log, "starting connection attempt...");
 	for (;;) {
-		co_debug(&ctx->log, "starting connection attempt...");
 		err = connect(sock, gai->ai_addr, gai->ai_addrlen);
 		if (err == 0)
 			break;
@@ -372,6 +376,7 @@ co_file_t *co_connect_tcp(
 			f->waiting = thread_self(ctx->threads);
 			event_fd_want_write(f->fd);
 			thread_defer_self(ctx->threads);
+			co_debug(&ctx->log, "attempting to complete connection");
 			continue;
 
 		default:
@@ -454,6 +459,27 @@ co_logger_t *co_logger(
 	logger->log_level = inherit->log_level;
 
 	return logger;
+}
+
+ssize_t co_fprintf(
+	co_context_t                  *ctx,
+	co_file_t                     *file,
+	const char                    *fmt,
+	...
+) {
+	char buf[8192];
+	va_list va;
+	int sz;
+	ssize_t wsize;
+
+	va_start(va, fmt);
+	sz = vsnprintf(buf, 8192, fmt, va);
+	va_end(va);
+
+	if (co_write(ctx, file, buf, sz, &wsize) < 0)
+		return -1;
+
+	return wsize;
 }
 
 co_context_t *co_init(void) {
