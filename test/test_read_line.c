@@ -4,6 +4,7 @@
 
 static void main_thread(co_context_t *co, void *user) {
 	co_file_t *peer;
+	co_logger_t *log;
 	const char *request =
 		"GET / HTTP/1.0\r\n"
 		"Host: google.com\r\n"
@@ -13,23 +14,26 @@ static void main_thread(co_context_t *co, void *user) {
 	char buf[2048];
 	ssize_t rsize;
 
-	printf("connecting...\n");
+	log = co_logger(co, NULL);
+	co_log_level(co, log, CO_LOG_INFO);
+
+	co_info(log, "connecting...");
 	peer = co_connect_tcp(co, "google.com", 80);
 
 	if (peer == NULL) {
-		printf("connect failed :(\n");
+		co_error(log, "connect failed :(");
 		return;
 	}
 
-	printf("connected! sending request...\n");
+	co_info(log, "connected! sending request...");
 	co_write(co, peer, request, strlen(request), NULL);
-	printf("request sent! reading response, a line at a time...\n");
+	co_info(log, "request sent! reading response, a line at a time...");
 
 	while (co_read_line(co, peer, buf, 2048)) {
-		printf("line: %s\n", buf);
+		co_info(log, "line: %s$", buf);
 	}
 
-	printf("end of response. bye!\n");
+	co_info(log, "end of response. bye!");
 }
 
 int main(int argc, char *argv[]) {

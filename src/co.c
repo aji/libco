@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,13 +22,6 @@
 
 #define error(x) abort()
 
-struct co_context {
-	thread_context_t *threads;
-	int num_threads;
-	struct new_thread *new_thread;
-	co_file_t *files;
-};
-
 struct co_file {
 	thread_t *waiting;
 	int fd;
@@ -35,6 +29,19 @@ struct co_file {
 	int readbuflen;
 	co_file_t *next;
 	co_file_t *prev;
+};
+
+struct co_logger {
+	co_logger_t *inherit;
+	co_log_level_t log_level;
+};
+
+struct co_context {
+	thread_context_t *threads;
+	int num_threads;
+	struct new_thread *new_thread;
+	co_file_t *files;
+	co_logger_t log;
 };
 
 struct new_thread {
@@ -90,6 +97,9 @@ co_err_t co_spawn(
 	ctx->new_thread = next;
 	ctx->num_threads ++;
 
+	co_debug(&ctx->log, "spawning a new thread: start=%p user=%p",
+		start, user);
+
 	return 0;
 }
 
@@ -106,6 +116,11 @@ co_err_t co_read(
 	if (file->waiting != NULL) {
 		error("another context is already waiting on this file");
 		return -1;
+	}
+
+	if (nbyte > 1) {
+		co_trace(&ctx->log, "begin read: file=%p buf=%p nbyte=%d",
+			file, buf, nbyte);
 	}
 
 	total = 0;
@@ -177,6 +192,9 @@ bool co_read_line(
 
 	total = 0;
 
+	co_trace(&ctx->log, "begin read line: file=%p buf=%p nbyte=%d",
+		file, buf, nbyte);
+
 	while (nbyte > 1) {
 		co_read(ctx, file, &byte, 1, &rsz);
 		if (rsz == 0)
@@ -225,6 +243,9 @@ co_err_t co_write(
 ) {
 	ssize_t wsz;
 
+	co_trace(&ctx->log, "begin write: file=%p buf=%p nbyte=%d",
+		file, buf, nbyte);
+
 	if (file->waiting != NULL) {
 		error("another context is already waiting on this file");
 		return -1;
@@ -249,6 +270,8 @@ co_file_t *co_open(
 	int fd;
 	co_file_t *f;
 
+	co_trace(&ctx->log, "opening file: %s", path);
+
 	if (!(fd = open(path, O_RDONLY)))
 		return NULL;
 
@@ -264,6 +287,8 @@ void co_close(
 ) {
 	if (f == NULL)
 		return;
+
+	co_trace(&ctx->log, "closing file");
 
 	remove_file(ctx, f);
 
@@ -285,13 +310,19 @@ co_file_t *co_connect_tcp(
 	co_file_t *f;
 	char buf[512];
 
+	co_info(&ctx->log, "connect to %s:%d", host, port);
+
 	/* TODO: replace this with an async lookup mechanism */
 	memset(&gai_hints, 0, sizeof(gai_hints));
 	gai_hints.ai_family = AF_INET;
 	gai_hints.ai_socktype = SOCK_STREAM;
 	gai_hints.ai_protocol = 0;
 	if ((err = getaddrinfo(host, NULL, &gai_hints, &gai)) != 0) {
-		printf("co_connect_tcp failed: %s\n", gai_strerror(err));
+		co_error(
+			&ctx->log,
+			"co_connect_tcp failed: %s\n",
+			gai_strerror(err)
+		);
 		return NULL;
 	}
 	if (gai->ai_addr == NULL)
@@ -312,6 +343,13 @@ co_file_t *co_connect_tcp(
 		goto fail_addr;
 	}
 
+	if (inet_ntop(gai->ai_family, addr, buf, 512)) {
+		co_debug(&ctx->log, "address resolves to %s", buf);
+	} else {
+		snprintf(buf, 512, "<inet_ntop failure>");
+		co_notice(&ctx->log, "inet_ntop failed?");
+	}
+
 	if ((sock = socket(gai->ai_family, SOCK_STREAM, 0)) < 0)
 		goto fail_addr;
 	fcntl(sock, F_SETFL, O_NONBLOCK);
@@ -320,6 +358,7 @@ co_file_t *co_connect_tcp(
 	add_file(ctx, f);
 
 	for (;;) {
+		co_debug(&ctx->log, "starting connection attempt...");
 		err = connect(sock, gai->ai_addr, gai->ai_addrlen);
 		if (err == 0)
 			break;
@@ -328,6 +367,7 @@ co_file_t *co_connect_tcp(
 		case EINPROGRESS:
 		case EINTR:
 		case EALREADY:
+			co_trace(&ctx->log, "connection not ready; deferring");
 			f->waiting = thread_self(ctx->threads);
 			event_fd_want_write(f->fd);
 			thread_defer_self(ctx->threads);
@@ -338,17 +378,73 @@ co_file_t *co_connect_tcp(
 		}
 	}
 
+	co_debug(&ctx->log, "connection to %s:%d ready", host, port);
 	freeaddrinfo(gai);
 	return f;
 
 fail_connect:
-	perror("co_connect_tcp failed");
+	co_error(&ctx->log, "connection failed: %s", strerror(errno));
 	remove_file(ctx, f);
 	free(f);
 	close(sock);
 fail_addr:
 	freeaddrinfo(gai);
 	return NULL;
+}
+
+static const char *log_level_names[] = {
+	[CO_LOG_TRACE]    = "TRACE",
+	[CO_LOG_DEBUG]    = "DEBUG",
+	[CO_LOG_INFO]     = "INFO",
+	[CO_LOG_NOTICE]   = "NOTICE",
+	[CO_LOG_WARN]     = "WARN",
+	[CO_LOG_ERROR]    = "ERROR",
+	[CO_LOG_FATAL]    = "FATAL",
+};
+
+void __co_log(
+	co_logger_t                   *logger,
+	const char                    *func,
+	int                            line,
+	co_log_level_t                 level,
+	const char                    *fmt,
+	...
+) {
+	char buf[2048];
+	va_list va;
+
+	if (level < logger->log_level)
+		return;
+
+	va_start(va, fmt);
+	vsnprintf(buf, 2048, fmt, va);
+	va_end(va);
+
+	printf("%s:%d: [%s] %s\n", func, line, log_level_names[level], buf);
+}
+
+void co_log_level(
+	co_context_t                  *ctx,
+	co_logger_t                   *logger,
+	co_log_level_t                 level
+) {
+	if (logger == NULL)
+		logger = &ctx->log;
+	logger->log_level = level;
+}
+
+co_logger_t *co_logger(
+	co_context_t                  *ctx,
+	co_logger_t                   *inherit
+) {
+	co_logger_t *logger = calloc(1, sizeof(*logger));
+
+	if (inherit == NULL)
+		inherit = &ctx->log;
+	logger->inherit = inherit;
+	logger->log_level = inherit->log_level;
+
+	return logger;
 }
 
 co_context_t *co_init(void) {
@@ -358,8 +454,12 @@ co_context_t *co_init(void) {
 	ctx->threads = thread_context_new();
 	ctx->new_thread = NULL;
 	ctx->files = NULL;
+	ctx->log.inherit = NULL;
+	ctx->log.log_level = CO_LOG_NOTICE;
 
 	event_init();
+
+	co_trace(&ctx->log, "co context initialized");
 
 	return ctx;
 }
@@ -370,6 +470,7 @@ static thread_t *unwait(co_context_t *ctx, int fd) {
 	for (f=ctx->files; f; f=f->next) {
 		if (f->fd == fd) {
 			thread_t *t = f->waiting;
+			co_trace(&ctx->log, "  fd=%d -> t=%p", fd, t);
 			f->waiting = NULL;
 			return t;
 		}
@@ -384,7 +485,10 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 	event_polled_t evt;
 	co_file_t *f;
 
+	co_trace(&ctx->log, "poll...");
+
 	if (ctx->num_threads == 0) {
+		co_debug(&ctx->log, "no threads left; stopping");
 		thread_context_stop(threads);
 		return NULL;
 	}
@@ -393,15 +497,18 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 		struct new_thread *next = ctx->new_thread->next;
 		res = ctx->new_thread->t;
 		ctx->new_thread = next;
+		co_debug(&ctx->log, "starting newly spawned thread");
 		return res;
 	}
 
 	if (event_poll(&evt)) {
 		switch (evt.tag) {
 		case EVENT_NOTHING:
+			co_trace(&ctx->log, "no events ready");
 			break;
 		case EVENT_FD_CAN_READ:
 		case EVENT_FD_CAN_WRITE:
+			co_trace(&ctx->log, "fd=%d ready for IO", evt.v.fd);
 			return unwait(ctx, evt.v.fd);
 		}
 	}
@@ -414,7 +521,9 @@ void co_run(
 	co_thread_fn                  *start,
 	void                          *user
 ) {
+	co_trace(&ctx->log, "spawning start thread");
 	co_spawn(ctx, start, user);
 
+	co_debug(&ctx->log, "entering thread run loop");
 	thread_context_run(ctx->threads, thread_poller, ctx);
 }
