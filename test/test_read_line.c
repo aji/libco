@@ -40,5 +40,6 @@ int main(int argc, char *argv[]) {
 	co_context_t *co;
 
 	co = co_init();
+	co_log_level(co, NULL, CO_LOG_DEBUG);
 	co_run(co, main_thread, NULL);
 }

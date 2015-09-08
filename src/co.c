@@ -16,6 +16,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define READBUF_SIZE 2048
@@ -410,7 +411,10 @@ void __co_log(
 	const char                    *fmt,
 	...
 ) {
+	char date[128];
 	char buf[2048];
+	time_t t;
+	struct tm gmt;
 	va_list va;
 
 	if (level < logger->log_level)
@@ -420,7 +424,12 @@ void __co_log(
 	vsnprintf(buf, 2048, fmt, va);
 	va_end(va);
 
-	printf("%s:%d: [%s] %s\n", func, line, log_level_names[level], buf);
+	time(&t);
+	gmtime_r(&t, &gmt);
+	strftime(date, 128, "%Y-%m-%dT%H:%M:%SZ", &gmt);
+
+	printf("[%s] %s:%d: [%s] %s\n",
+		date, func, line, log_level_names[level], buf);
 }
 
 void co_log_level(
