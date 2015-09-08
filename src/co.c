@@ -32,7 +32,7 @@ struct co_file {
 	thread_t *waiting;
 	int fd;
 	char readbuf[READBUF_SIZE];
-	size_t readbuflen;
+	int readbuflen;
 	co_file_t *next;
 	co_file_t *prev;
 };
@@ -163,6 +163,57 @@ co_err_t co_read(
 
 	if (rsize) *rsize = total;
 	return 0;
+}
+
+bool co_read_line(
+	co_context_t                  *ctx,
+	co_file_t                     *file,
+	void                          *_buf,
+	size_t                         nbyte
+) {
+	int total;
+	unsigned char byte, *buf = _buf;
+	ssize_t rsz;
+
+	total = 0;
+
+	while (nbyte > 1) {
+		co_read(ctx, file, &byte, 1, &rsz);
+		if (rsz == 0)
+			break;
+		total++;
+		if (byte == '\r' && nbyte > 2) {
+			co_read(ctx, file, &byte, 1, &rsz);
+			total++;
+			if (rsz == 0) {
+				*buf++ = '\r';
+				nbyte--;
+				break;
+			} else if (byte != '\n') {
+				*buf++ = '\r';
+				*buf++ = byte;
+				nbyte -= 2;
+				break;
+			}
+
+			if (rsz == 0 || byte != '\n') {
+				*buf++ = '\r';
+				*buf++ = byte;
+				nbyte -= 2;
+				if (rsz == 0)
+					break;
+			} else if (byte == '\n') {
+				break;
+			}
+		}
+		if (byte == '\n')
+			break;
+		*buf++ = byte;
+		nbyte--;
+	}
+
+	*buf = '\0';
+	return total > 0;
 }
 
 co_err_t co_write(
