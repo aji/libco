@@ -41,6 +41,10 @@ in terms of these functions, then `libco` is for you:
 
 * Thread management
    * `co_spawn`
+* Logging
+   * `co_log` and per-level macros
+   * `co_log_level`
+   * `co_logger`
 * IO
    * `co_read`
    * `co_read_line`
