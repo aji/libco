@@ -16,12 +16,15 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
 #define READBUF_SIZE 2048
 
 #define error(x) abort()
+
+typedef struct co_timer co_timer_t;
 
 struct co_file {
 	thread_t *waiting;
@@ -37,12 +40,19 @@ struct co_logger {
 	co_log_level_t log_level;
 };
 
+struct co_timer {
+	thread_t *waiting;
+	struct timeval fire;
+	co_timer_t *next;
+};
+
 struct co_context {
 	thread_context_t *threads;
 	int num_threads;
 	struct new_thread *new_thread;
 	co_file_t *files;
 	co_logger_t log;
+	co_timer_t *timers;
 };
 
 struct new_thread {
@@ -325,7 +335,7 @@ co_file_t *co_connect_tcp(
 	if ((err = getaddrinfo(host, NULL, &gai_hints, &gai)) != 0) {
 		co_error(
 			&ctx->log,
-			"co_connect_tcp failed: %s\n",
+			"co_connect_tcp failed: %s",
 			gai_strerror(err)
 		);
 		return NULL;
@@ -396,6 +406,77 @@ fail_connect:
 fail_addr:
 	freeaddrinfo(gai);
 	return NULL;
+}
+
+static void make_timer(
+	co_context_t *ctx,
+	thread_t *waiting,
+	struct timeval *fire
+) {
+	co_timer_t *timer, *cur;
+
+	timer = calloc(1, sizeof(*timer));
+	timer->waiting = waiting;
+	timer->fire.tv_sec  = fire->tv_sec;
+	timer->fire.tv_usec = fire->tv_usec;
+
+	/* sorted insert into ctx->timers, sorted by fire time */
+
+	/* if list empty, easy, just put it as the whole list */
+	if (ctx->timers == NULL) {
+		ctx->timers = timer;
+		return;
+	}
+
+	/* if before first element, easy, just put as start of list */
+	if (timercmp(&timer->fire, &ctx->timers->fire, <)) {
+		timer->next = ctx->timers;
+		ctx->timers = timer;
+		return;
+	}
+
+	/* otherwise, insert after last timer before it */
+	for (cur = ctx->timers; cur->next; cur = cur->next) {
+		if (timercmp(&timer->fire, &cur->next->fire, <)) {
+			timer->next = cur->next;
+			cur->next = timer;
+			return;
+		}
+	}
+
+	/* otherwise, goes at the very end! cur is last timer with a ->next */
+	cur->next = timer;
+}
+
+void co_usleep(
+	co_context_t                  *ctx,
+	unsigned long                  usecs
+) {
+	struct timeval now;
+
+	gettimeofday(&now, NULL);
+
+	now.tv_sec  += usecs / 1000000;
+	now.tv_usec += usecs % 1000000;
+
+	now.tv_sec  += now.tv_usec / 1000000;
+	now.tv_usec  = now.tv_usec % 1000000;
+
+	make_timer(ctx, thread_self(ctx->threads), &now);
+	thread_defer_self(ctx->threads);
+}
+
+void co_sleep(
+	co_context_t                  *ctx,
+	unsigned long                  secs
+) {
+	struct timeval now;
+
+	gettimeofday(&now, NULL);
+	now.tv_sec += secs;
+
+	make_timer(ctx, thread_self(ctx->threads), &now);
+	thread_defer_self(ctx->threads);
 }
 
 static const char *log_level_names[] = {
@@ -519,6 +600,8 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 	co_context_t *ctx = _ctx;
 	event_polled_t evt;
 	co_file_t *f;
+	struct timeval now, fire, timeout;
+	co_timer_t *timer;
 
 	co_trace(&ctx->log, "poll...");
 
@@ -536,7 +619,30 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 		return res;
 	}
 
-	if (event_poll(&evt)) {
+	gettimeofday(&now, NULL);
+
+	if (ctx->timers && !timercmp(&ctx->timers->fire, &now, >)) {
+		/* fire timer */
+		timer = ctx->timers;
+		res = timer->waiting;
+		ctx->timers = timer->next;
+		free(timer);
+		co_debug(&ctx->log, "firing timer for thread=%p", res);
+		return res;
+	}
+
+	/* limit loop delay to 1 second */
+	fire.tv_sec   = now.tv_sec + 1;
+	fire.tv_usec  = now.tv_usec;
+
+	if (ctx->timers && timercmp(&ctx->timers->fire, &fire, <)) {
+		fire.tv_sec  = ctx->timers->fire.tv_sec;
+		fire.tv_usec = ctx->timers->fire.tv_usec;
+	}
+
+	timersub(&fire, &now, &timeout);
+
+	if (event_poll(&evt, &timeout)) {
 		switch (evt.tag) {
 		case EVENT_NOTHING:
 			co_trace(&ctx->log, "no events ready");
@@ -547,6 +653,8 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 			return unwait(ctx, evt.v.fd);
 		}
 	}
+
+	/* don't check timers. we'll get the fired timer on the next loop */
 
 	return NULL;
 }

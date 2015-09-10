@@ -29,21 +29,17 @@ void event_fd_want_write(int fd) {
 	FD_SET(fd, &fds_waiting);
 }
 
-bool event_poll(event_polled_t *result) {
+bool event_poll(event_polled_t *result, struct timeval *timeout) {
 	fd_set r, w, x;
-	struct timeval tv;
 	int fd;
 
 	r = fds_waiting_read;
 	w = fds_waiting_write;
 	x = fds_waiting;
 
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-
 	result->tag = EVENT_NOTHING;
 
-	select(fd_max+1, &r, &w, &x, &tv);
+	select(fd_max+1, &r, &w, &x, timeout);
 
 	/* these loops are pretty nasty. optimization opportunity! */
 

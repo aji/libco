@@ -105,6 +105,20 @@ extern co_file_t *co_bind_tcp(
 	);
 
 
+/* MISCELLANEOUS
+   ========================================================================= */
+
+extern void co_usleep(
+	co_context_t                  *ctx,
+	unsigned long                  usecs
+	);
+
+extern void co_sleep(
+	co_context_t                  *ctx,
+	unsigned long                  secs
+	);
+
+
 /* CONVENIENCE AND HELPERS
    ========================================================================= */
 
