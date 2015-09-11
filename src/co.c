@@ -704,6 +704,7 @@ co_context_t *co_init(void) {
 	ctx->files = NULL;
 	ctx->log.inherit = NULL;
 	ctx->log.log_level = CO_LOG_NOTICE;
+	ctx->log.refcount = 1;
 
 	event_init();
 
