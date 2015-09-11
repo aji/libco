@@ -97,11 +97,19 @@ extern co_file_t *co_connect_tcp(
 	unsigned short                 port
 	);
 
-extern co_file_t *co_bind_tcp(
+extern co_file_t *co_bind_tcp6(
 	co_context_t                  *ctx,
 	const char                    *host,
 	unsigned short                 port,
 	int                            backlog
+	);
+
+co_file_t *co_accept(
+	co_context_t                  *ctx,
+	co_file_t                     *file,
+	char                          *addrbuf,
+	size_t                         addrbufsize,
+	unsigned short                *port
 	);
 
 

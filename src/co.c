@@ -408,6 +408,117 @@ fail_addr:
 	return NULL;
 }
 
+co_file_t *co_bind_tcp6(
+	co_context_t                  *ctx,
+	const char                    *host,
+	unsigned short                 port,
+	int                            backlog
+) {
+	int sock, one;
+	struct sockaddr_in6 sa6;
+	co_file_t *f;
+
+	memset(&sa6, 0, sizeof(sa6));
+	if (inet_pton(AF_INET6, host, &sa6.sin6_addr) < 0)
+		return NULL;
+	sa6.sin6_family = AF_INET6;
+	sa6.sin6_port = htons(port);
+
+	if ((sock = socket(AF_INET6, SOCK_STREAM, 0)) < 0)
+		return NULL;
+	fcntl(sock, F_SETFL, O_NONBLOCK);
+
+	one = 1;
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0)
+		goto fail_bind;
+
+	if (bind(sock, (void*)&sa6, sizeof(sa6)) < 0)
+		goto fail_bind;
+
+	if (listen(sock, backlog) < 0)
+		goto fail_bind;
+
+	f = new_file(sock);
+	add_file(ctx, f);
+
+	return f;
+
+fail_bind:
+	co_error(&ctx->log, "bind failed: %s", strerror(errno));
+	close(sock);
+	return NULL;
+}
+
+co_file_t *co_accept(
+	co_context_t                  *ctx,
+	co_file_t                     *file,
+	char                          *addrbuf,
+	size_t                         addrbufsize,
+	unsigned short                *port
+) {
+	co_file_t *peer;
+	struct sockaddr_storage ss;
+	struct sockaddr_in *sa4;
+	struct sockaddr_in6 *sa6;
+	socklen_t ssize;
+	int sock;
+	int af = -1;
+	void *addr;
+
+	co_debug(&ctx->log, "waiting for a connection...");
+	for (;;) {
+		ssize = sizeof(ss);
+		sock = accept(file->fd, (void*)&ss, &ssize);
+		if (sock >= 0)
+			break;
+
+		switch (errno) {
+		case EAGAIN:
+			co_trace(&ctx->log, "no connection ready; deferring");
+			file->waiting = thread_self(ctx->threads);
+			event_fd_want_read(file->fd);
+			thread_defer_self(ctx->threads);
+			continue;
+		case EINTR:
+			co_trace(&ctx->log, "interrupted by signal; trying again");
+			continue;
+		default:
+			co_error(&ctx->log, "accept failed: %s", strerror(errno));
+			return NULL;
+		}
+	}
+
+	fcntl(sock, F_SETFL, O_NONBLOCK);
+
+	peer = new_file(sock);
+	add_file(ctx, peer);
+
+	if (port) *port = 0;
+
+	switch (ssize) {
+	case sizeof(struct sockaddr_in):
+		af = AF_INET;
+		sa4 = (void*)&ss;
+		addr = &sa4->sin_addr;
+		if (port) *port = ntohs(sa4->sin_port);
+		break;
+	case sizeof(struct sockaddr_in6):
+		af = AF_INET6;
+		sa6 = (void*)&ss;
+		addr = &sa6->sin6_addr;
+		if (port) *port = ntohs(sa6->sin6_port);
+		break;
+	}
+
+	if (addrbuf != NULL) {
+		if (af < 0 || !inet_ntop(af, addr, addrbuf, addrbufsize)) {
+			snprintf(addrbuf, addrbufsize, "<unknown>");
+		}
+	}
+
+	return peer;
+}
+
 static void make_timer(
 	co_context_t *ctx,
 	thread_t *waiting,
