@@ -11,13 +11,18 @@ static void echo_thread(co_context_t *co, void *_peer) {
 	co_file_t *peer = _peer;
 	char byte;
 	size_t rsize;
+	size_t wsize;
 
 	for (;;) {
 		co_read(co, peer, &byte, 1, &rsize);
 		if (rsize == 0)
 			break;
-		co_write(co, peer, &byte, 1, NULL);
+		co_write(co, peer, &byte, 1, &wsize);
+		if (wsize == 0)
+			break;
 	}
+
+	co_close(co, peer);
 }
 
 static void main_thread(co_context_t *co, void *unused) {

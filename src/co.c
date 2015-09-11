@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -770,11 +771,16 @@ static thread_t *thread_poller(thread_context_t *threads, void *_ctx) {
 	return NULL;
 }
 
+static void do_nothing(int unused) { }
+
 void co_run(
 	co_context_t                  *ctx,
 	co_thread_fn                  *start,
 	void                          *user
 ) {
+	co_trace(&ctx->log, "installing dummy SIGPIPE handler");
+	signal(SIGPIPE, do_nothing);
+
 	co_trace(&ctx->log, "spawning start thread");
 	co_spawn(ctx, start, user);
 
