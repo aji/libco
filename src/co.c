@@ -39,6 +39,7 @@ struct co_file {
 struct co_logger {
 	co_logger_t *inherit;
 	co_log_level_t log_level;
+	int refcount;
 };
 
 struct co_timer {
@@ -654,9 +655,22 @@ co_logger_t *co_logger(
 	if (inherit == NULL)
 		inherit = &ctx->log;
 	logger->inherit = inherit;
+	logger->inherit->refcount++;
 	logger->log_level = inherit->log_level;
+	logger->refcount = 0;
 
 	return logger;
+}
+
+void co_logger_close(
+	co_context_t                  *ctx,
+	co_logger_t                   *logger
+) {
+	logger->inherit->refcount--;
+	if (logger->inherit->refcount <= 0)
+		co_logger_close(ctx, logger);
+	if (logger->refcount <= 0)
+		free(logger);
 }
 
 ssize_t co_fprintf(

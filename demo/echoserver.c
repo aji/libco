@@ -24,6 +24,7 @@ static void echo_thread(co_context_t *co, void *_peer) {
 
 	co_info(log, "echo thread exiting!");
 	co_close(co, peer);
+	co_logger_close(co, log);
 }
 
 static void main_thread(co_context_t *co, void *unused) {

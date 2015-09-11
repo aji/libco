@@ -43,7 +43,6 @@ void event_fd_want_read(int fd) {
 }
 
 void event_fd_want_write(int fd) {
-	struct waiting *w = calloc(1, sizeof(*w));
 	if (fd > fd_max) fd_max = fd;
 	FD_SET(fd, &fds_waiting_write);
 	add_to_queue(fd);

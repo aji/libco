@@ -161,6 +161,11 @@ extern co_logger_t *co_logger(
 	co_logger_t                   *inherit
 	);
 
+extern void co_logger_close(
+	co_context_t                  *ctx,
+	co_logger_t                   *log
+	);
+
 extern ssize_t co_fprintf(
 	co_context_t                  *ctx,
 	co_file_t                     *file,

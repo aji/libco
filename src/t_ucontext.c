@@ -43,12 +43,15 @@ struct thread {
 	ucontext_t context;
 	thread_fn *start;
 	void *user;
+	void *stack;
 };
 
 static void start_thread(int c0, int c1, int t0, int t1) {
 	thread_context_t *ctx = DEPTR(c0,c1);
 	thread_t *t = DEPTR(t0,t1);
 	t->start(ctx, t->user);
+	free(t->context.uc_stack.ss_sp);
+	free(t);
 }
 
 thread_context_t *thread_context_new(void) {
