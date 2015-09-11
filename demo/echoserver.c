@@ -8,20 +8,21 @@
 #include <string.h>
 
 static void echo_thread(co_context_t *co, void *_peer) {
+	co_logger_t *log = co_logger(co, NULL);
 	co_file_t *peer = _peer;
 	char byte;
 	size_t rsize;
-	size_t wsize;
 
 	for (;;) {
-		co_read(co, peer, &byte, 1, &rsize);
+		if (co_read(co, peer, &byte, 1, &rsize) < 0)
+			break;
 		if (rsize == 0)
 			break;
-		co_write(co, peer, &byte, 1, &wsize);
-		if (wsize == 0)
+		if (co_write(co, peer, &byte, 1, NULL) < 0)
 			break;
 	}
 
+	co_info(log, "echo thread exiting!");
 	co_close(co, peer);
 }
 

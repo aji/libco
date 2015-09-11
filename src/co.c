@@ -273,8 +273,13 @@ co_err_t co_write(
 	thread_defer_self(ctx->threads);
 
 	wsz = write(file->fd, buf, nbyte);
-	if (wsize) *wsize = wsz;
-	return 0;
+	if (wsz < 0) {
+		if (wsize) *wsize = 0;
+		return -1;
+	} else {
+		if (wsize) *wsize = wsz;
+		return 0;
+	}
 }
 
 co_file_t *co_open(
