@@ -657,7 +657,7 @@ co_logger_t *co_logger(
 	logger->inherit = inherit;
 	logger->inherit->refcount++;
 	logger->log_level = inherit->log_level;
-	logger->refcount = 0;
+	logger->refcount = 1;
 
 	return logger;
 }
@@ -669,6 +669,7 @@ void co_logger_close(
 	logger->inherit->refcount--;
 	if (logger->inherit->refcount <= 0)
 		co_logger_close(ctx, logger);
+	logger->refcount--;
 	if (logger->refcount <= 0)
 		free(logger);
 }
